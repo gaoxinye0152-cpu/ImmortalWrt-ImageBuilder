@@ -1,0 +1,76 @@
+name: Build TR3000 256MB
+run-name: TR3000 256MB with OpenClash, IPv6 and UPnP
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/tr3000-256mb-build
+    paths:
+      - .github/workflows/build-tr3000-256mb.yml
+      - shell/apk-custom-packages.sh
+      - shell/apk-prepare-packages.sh
+      - glinet/99-custom.sh
+      - mediatek-filogic/build25.sh
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout configuration
+        uses: actions/checkout@v6
+
+      - name: Check scripts and prepare LAN address
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n shell/apk-custom-packages.sh
+          bash -n mediatek-filogic/build25.sh
+          sh -n glinet/99-custom.sh
+          mkdir -p bin custom
+          printf '%s\n' '192.168.100.1' > custom/custom_router_ip.txt
+
+      - name: Build TR3000 256MB using the repository ImageBuilder script
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --user root \
+            -v "$GITHUB_WORKSPACE/bin:/home/build/immortalwrt/bin" \
+            -v "$GITHUB_WORKSPACE/glinet:/home/build/immortalwrt/files/etc/uci-defaults" \
+            -v "$GITHUB_WORKSPACE/custom:/home/build/immortalwrt/files/etc/config" \
+            -v "$GITHUB_WORKSPACE/shell:/home/build/immortalwrt/shell" \
+            -v "$GITHUB_WORKSPACE/mediatek-filogic/build25.sh:/home/build/immortalwrt/build.sh" \
+            -e PROFILE=cudy_tr3000-256mb-v1 \
+            -e INCLUDE_DOCKER=no \
+            -e ENABLE_PPPOE=no \
+            -e PPPOE_ACCOUNT= \
+            -e PPPOE_PASSWORD= \
+            immortalwrt/imagebuilder:mediatek-filogic-openwrt-25.12.2 \
+            /bin/bash -e -o pipefail /home/build/immortalwrt/build.sh
+
+      - name: Check firmware output and requested packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          output_dir=bin/targets/mediatek/filogic
+          image="$output_dir/immortalwrt-25.12.2-mediatek-filogic-cudy_tr3000-256mb-v1-squashfs-sysupgrade.bin"
+          test -s "$image"
+          for package in luci-app-openclash wpad-openssl dnsmasq-full odhcp6c odhcpd-ipv6only luci-proto-ipv6 luci-app-upnp; do
+            if ! grep -h -E "^${package}([[:space:]]|$)" "$output_dir"/*.manifest; then
+              echo "Requested package missing from manifest: $package" >&2
+              exit 1
+            fi
+          done
+          sha256sum "$image"
+
+      - name: Upload firmware and manifests for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: tr3000-256mb-openclash-ipv6-upnp-${{ github.sha }}
+          path: bin/targets/mediatek/filogic/*
+          if-no-files-found: error
+          retention-days: 14
