@@ -74,18 +74,23 @@ if echo "$PACKAGES" | grep -q "luci-app-openclash"; then
     mkdir -p files/etc/openclash/core
     # Download clash_meta
     META_URL="https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-arm64.tar.gz"
-    wget -qO- $META_URL | tar xOvz > files/etc/openclash/core/clash_meta
+    curl -fL --retry 3 "$META_URL" -o /tmp/openclash-core-arm64.tar.gz
+    tar -xOzf /tmp/openclash-core-arm64.tar.gz > files/etc/openclash/core/clash_meta
+    test -s files/etc/openclash/core/clash_meta
     chmod +x files/etc/openclash/core/clash_meta
     # Download GeoIP and GeoSite
     wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat -O files/etc/openclash/GeoIP.dat
     wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat -O files/etc/openclash/GeoSite.dat
     # Download latest openclash Client
-    URL=$(curl -s https://api.github.com/repos/vernesong/OpenClash/releases/latest \
-      | grep "browser_download_url.*apk" \
-      | head -n1 \
-      | cut -d '"' -f 4)
+    curl -fL --retry 3 https://api.github.com/repos/vernesong/OpenClash/releases/latest \
+      -o /tmp/openclash-release.json
+    URL=$(python3 -c 'import json; r=json.load(open("/tmp/openclash-release.json")); print(next((a["browser_download_url"] for a in r["assets"] if a["name"].endswith(".apk")), ""))')
+    if [ -z "$URL" ]; then
+      echo "OpenClash release contains no APK asset" >&2
+      exit 1
+    fi
     echo "OpenClash latest apk: $URL"
-    wget "$URL" -P /home/build/immortalwrt/packages/
+    curl -fL --retry 3 "$URL" -o "/home/build/immortalwrt/packages/$(basename "$URL")"
 else
     echo "⚪️ 未选择 luci-app-openclash"
 fi
